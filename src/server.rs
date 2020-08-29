@@ -26,7 +26,7 @@ struct ServerState {
 }
 
 impl ServerState {
-	fn new(dest: SocketAddr, opts: (usize, u32)) -> ServerState {
+	fn new(dest: SocketAddr, opts: (usize, u32, bool)) -> ServerState {
 		ServerState {
 			sessions: Arc::new(RwLock::new(HashMap::new())),
 			dest: dest,
@@ -398,7 +398,7 @@ async fn listen(listen_port: SocketAddr, server_state: Arc<ServerState>) -> Resu
 	Ok(OpStatus::Done)
 }
 
-pub fn run(listen_port: &str, dest_port: &str, log_path: &str, opts: (usize, u32)) -> i32 {
+pub fn run(listen_port: &str, dest_port: &str, log_path: &str, opts: (usize, u32, bool)) -> i32 {
 	if log_path == "stderr" {
 		Logger::with_env_or_str("layline=info, server=info")
 			.format(opt_format)

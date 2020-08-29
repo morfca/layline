@@ -18,6 +18,9 @@ fn main() {
 			.about("maximum simultaneous sessions allowed, default=100")
 			.long("max-sessions")
 			.takes_value(true))
+		.arg(Arg::with_name("ALLOW_PLAINTEXT")
+			.about("allow outbound connections to use plaintext in client modes")
+			.long("allow-plaintext"))
 		.subcommand(App::new("server")
 			.about("run as a server")
 			.arg(Arg::with_name("LISTEN_PORT")
@@ -57,7 +60,8 @@ fn main() {
 		Some(s) => s.parse().unwrap(),
 		None => constants::DEFAULT_SESSION_TIMEOUT,
 	};
-	let opts = (max_sessions, timeout_sessions);
+	let allow_plaintext = matches.is_present("ALLOW_PLAINTEXT");
+	let opts = (max_sessions, timeout_sessions, allow_plaintext);
 	match matches.subcommand() {
 		("proxyclient", Some(matches)) => {
 			let dest_port = matches.value_of("DEST_URL").unwrap();

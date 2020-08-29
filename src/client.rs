@@ -299,7 +299,7 @@ impl ClientSession {
 	// request session allocation from the server, allocate session state in the local process, and spawn
 	// futures to process io for the session as well as housekeeping such as signal handling and timeouts
 	async fn initialize_session(h: Handle, base_url: String, reader: ClientReader, writer: ClientWriter,
-								addr: Option<SocketAddr>, opts: (usize, u32)) -> Result<ClientOpStatus, ClientError> {
+								addr: Option<SocketAddr>, opts: (usize, u32, bool)) -> Result<ClientOpStatus, ClientError> {
 		let h = Arc::new(h);
 		let id = match h.spawn(ClientSession::request_session(h.clone(), base_url.clone(), addr)).await? {
 			Ok(ClientOpStatus::SessionId(id)) => id,
@@ -354,7 +354,7 @@ impl ClientSession {
 }
 
 // listener acceptor for handling incoming connections
-async fn client_listen(h: Handle, listen_port: String, base_url: String, opts: (usize, u32)) -> Result<ClientOpStatus, tokio::io::Error> {
+async fn client_listen(h: Handle, listen_port: String, base_url: String, opts: (usize, u32, bool)) -> Result<ClientOpStatus, tokio::io::Error> {
 	let mut listener = TcpListener::bind(listen_port).await?;
 	loop {
 		let (sock, addr) = listener.accept().await?;
@@ -365,13 +365,23 @@ async fn client_listen(h: Handle, listen_port: String, base_url: String, opts: (
 	}
 }
 
+fn validate_url(base_url: &str, opts: (usize, u32, bool)) {
+	if !base_url.starts_with("https://") && !opts.2 {
+		panic!("URL must start with \"https://\" unless --allow-plaintext is set");
+	}
+	if opts.2 && !(base_url.starts_with("http://") || base_url.starts_with("https://")) {
+		panic!("URL must start with \"https://\" or \"https://\"")
+	}
+}
+
 // synchronous initialization function for running as a standing listener that creates
 // sessions for each incoming connection
-pub fn run(listen_port: &str, base_url: &str, opts: (usize, u32)) -> i32 {
+pub fn run(listen_port: &str, base_url: &str, opts: (usize, u32, bool)) -> i32 {
 	Logger::with_env_or_str("layline=info, client=info")
 		.format(opt_format)
 		.start()
 		.unwrap_or_else(|e| panic!("Logger initialization failed with {}", e));
+	validate_url(&base_url, opts);
 	let rt = tokio::runtime::Runtime::new().unwrap();
 	let h = rt.handle();
 	let ret = match h.block_on(client_listen(h.clone(), String::from(listen_port), String::from(base_url), opts)) {
@@ -383,7 +393,7 @@ pub fn run(listen_port: &str, base_url: &str, opts: (usize, u32)) -> i32 {
 }
 
 // asynchronous entry point for running as an stdin/stdout proxy
-async fn do_proxy(h: Handle, base_url: String, opts: (usize, u32)) -> Result<ClientOpStatus, tokio::io::Error> {
+async fn do_proxy(h: Handle, base_url: String, opts: (usize, u32, bool)) -> Result<ClientOpStatus, tokio::io::Error> {
 	let stdin = ClientReader::Stdin(tokio::io::stdin());
 	let stdout = ClientWriter::Stdout(tokio::io::stdout());
 	let ret = match h.spawn(ClientSession::initialize_session(h.clone(), base_url.clone(), stdin, stdout, None, opts)).await {
@@ -394,11 +404,12 @@ async fn do_proxy(h: Handle, base_url: String, opts: (usize, u32)) -> Result<Cli
 }
 
 // synchronous initialization function for running as an stdin/stdout proxy
-pub fn proxy_run(base_url: &str, opts: (usize, u32)) -> i32 {
+pub fn proxy_run(base_url: &str, opts: (usize, u32, bool)) -> i32 {
 	Logger::with_env_or_str("layline=error, client=error")
 		.format(opt_format)
 		.start()
 		.unwrap_or_else(|e| panic!("Logger initialization failed with {}", e));
+	validate_url(&base_url, opts);
 	let rt = tokio::runtime::Runtime::new().unwrap();
 	let h = rt.handle();
 	let ret = match h.block_on(do_proxy(h.clone(), String::from(base_url), opts)) {
