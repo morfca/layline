@@ -69,6 +69,23 @@ this hosts layline API endpoints at the example path /abc123/ on a plaintext hos
 </VirtualHost>
 ```
 
+### openssh
+
+this can be added to a user's .ssh/config file to automatically tunnel via HTTPS for a particular hostname
+
+```
+Host example.org
+  ProxyCommand layline proxyclient https://example.org/abc123/
+```
+
+with this config in place an ssh session can be established transparently
+
+```
+user@laptop ~ $ ssh example.org
+Last login: Mon April 20 16:20 2020 from 1.2.3.4
+user@server ~ $
+```
+
 ## API
 
 ### GET /create
