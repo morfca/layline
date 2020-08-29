@@ -85,6 +85,15 @@ user@laptop ~ $ ssh example.org
 Last login: Mon April 20 16:20 2020 from 1.2.3.4
 user@server ~ $
 ```
+### proxy server
+
+proxy support is provided via the HTTP_PROXY and HTTPS_PROXY environment variables, including optional authentication. for example, when used in proxyclient mode layline will inherit the environment from ssh, so the variable can be exported to ssh.
+
+```
+user@laptop ~ $ HTTPS_PROXY="http://user:pass@192.168.0.1/" ssh example.org
+Last login: Mon April 20 16:20 2020 from 1.2.3.4
+user@server ~ $
+```
 
 ## API
 
