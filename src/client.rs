@@ -83,6 +83,7 @@ macro_rules! activity_heartbeat {
 	}
 }
 
+// we have to use a match block even though the API is the same until I figure out the dyn obj way to do this
 macro_rules! write_buff {
 	($writer:expr, $buff:expr) => {
 		match $writer.deref_mut() {
@@ -92,6 +93,8 @@ macro_rules! write_buff {
 	}
 }
 
+// stdout is buffered, OwnedWriteHalf is not. we have to flush the buffer otherwise some protocols (eg ssh)
+// will deadlock
 macro_rules! flush_buff {
 	($writer:expr) => {
 		match $writer.deref_mut() {
@@ -379,6 +382,7 @@ pub fn run(listen_port: &str, base_url: &str, opts: (usize, u32)) -> i32 {
 	ret
 }
 
+// asynchronous entry point for running as an stdin/stdout proxy
 async fn do_proxy(h: Handle, base_url: String, opts: (usize, u32)) -> Result<ClientOpStatus, tokio::io::Error> {
 	let stdin = ClientReader::Stdin(tokio::io::stdin());
 	let stdout = ClientWriter::Stdout(tokio::io::stdout());

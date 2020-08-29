@@ -77,6 +77,8 @@ enum OpStatus {
 	Done,
 }
 
+// tokio requires error types in futures, this enum is to allow futures with multiple possible error types
+// below we provide impl's for ServerError to allow automatic wrapping and formatting for logging
 enum ServerError {
 	IO(std::io::Error),
 	JOIN(tokio::task::JoinError),
@@ -117,6 +119,8 @@ impl Drop for Session {
     }
 }
 
+// due to D.R.Y. we create all responses here
+// since we want to run behind CDN's etc we can't afford to forget Cache-Control headers etc
 macro_rules! make_response {
 	($code:expr) => {
 		make_response!($code, Body::empty())
@@ -140,6 +144,8 @@ macro_rules! make_response {
 	};
 }
 
+// we need to use a macro rather than a function to run the response future because .await
+// wants to be able to return. consolidating error handling is also convenient.
 macro_rules! do_response {
 	($resp_fn:expr) => {
 		match tokio::spawn($resp_fn).await {
@@ -162,6 +168,7 @@ macro_rules! do_response {
 	}
 }
 
+// make sure we don't have panics later due to missing the session header
 macro_rules! check_session_header {
 	($request:expr) => {		
 		if !$request.headers().contains_key("x-layline-session") {
@@ -176,6 +183,9 @@ macro_rules! get_session_id {
 	}
 }
 
+// retrieve the session given the session id
+// clients are expected to 404 sometimes as there is no reliable way to guarantee which side will close the
+// session first due to timeouts, downstream disconencts, etc
 macro_rules! get_session {
 	($req_id:expr, $server_state:expr) => {
 		match get_session_from_req(&$req_id, $server_state).await {
