@@ -1,6 +1,6 @@
 [package]
 name = "layline"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Anthony Roberts <acrobert@gmail.com>"]
 edition = "2018"
 
@@ -10,7 +10,7 @@ lto = true
 codegen-units = 1
 
 [dependencies]
-clap = "3.0.0-beta.1"
+clap = "3.0.0-beta.2"
 flexi_logger = "0.15"
 hyper="0.13"
 log = "0.4"
