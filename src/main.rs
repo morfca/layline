@@ -5,6 +5,8 @@ mod constants;
 mod client;
 mod server;
 
+const EX_USAGE: i32 = 64;
+
 fn main() {
 	let matches = App::new("layline")
 		.version("0.2")
@@ -16,6 +18,10 @@ fn main() {
 		.arg(Arg::new("SESSION_TIMEOUT")
 			.about("inactivity timeout for sessions in seconds, default=900")
 			.long("session-timeout")
+			.takes_value(true))
+        .arg(Arg::new("CLIENT_IP_HEADER")
+			.about("header to use for original client IP, default=\"X-Forwarded-For\"")
+			.long("client-ip-header")
 			.takes_value(true))
 		.arg(Arg::new("MAX_SESSIONS")
 			.about("maximum simultaneous sessions allowed, default=100")
@@ -65,7 +71,19 @@ fn main() {
 	};
 	let allow_plaintext = matches.is_present("ALLOW_PLAINTEXT");
     let proxy_protocol = matches.is_present("PROXY_PROTOCOL");
-	let opts = (max_sessions, timeout_sessions, allow_plaintext, proxy_protocol);
+    let client_ip_header: String;
+    if matches.is_present("CLIENT_IP_HEADER") {
+        client_ip_header = match matches.value_of("CLIENT_IP_HEADER") {
+            Some(buff) => buff.to_string().to_lowercase(),
+            None => {
+                eprintln!("unable to parse client IP header option");
+                std::process::exit(EX_USAGE);
+            }
+        };
+    } else {
+        client_ip_header = "x-forwarded-for".to_string();
+    }
+	let opts = (max_sessions, timeout_sessions, allow_plaintext, proxy_protocol, client_ip_header);
 	match matches.subcommand() {
 		Some(("proxyclient", matches)) => {
 			let dest_port = matches.value_of("DEST_URL").unwrap();
