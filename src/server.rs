@@ -4,16 +4,18 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use flexi_logger::{Logger, opt_format};
+use hyper::{Body, Request, Response, StatusCode};
+use hyper::server::Server;
+use hyper::server::conn::AddrStream;
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Request, Response, Server, StatusCode};
 use log::{debug, error, info, warn};
-use rand_core::RngCore;
+use rand::RngCore;
+use rand::thread_rng;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::prelude::*;
-use tokio::stream::StreamExt;
 use tokio::sync::{Mutex, RwLock};
-use tokio::time::{delay_for, timeout};
+use tokio::time::{sleep, timeout};
 
 use crate::constants::*;
 
@@ -23,16 +25,18 @@ struct ServerState {
 	max_sessions: usize,
 	session_timeout: u32,
     proxy_protocol: bool,
+    client_ip_header: String,
 }
 
 impl ServerState {
-	fn new(dest: SocketAddr, opts: (usize, u32, bool, bool)) -> ServerState {
+	fn new(dest: SocketAddr, opts: (usize, u32, bool, bool, String)) -> ServerState {
 		ServerState {
 			sessions: Arc::new(RwLock::new(HashMap::new())),
 			dest: dest,
 			max_sessions: opts.0,
 			session_timeout: opts.1,
             proxy_protocol: opts.3,
+            client_ip_header: opts.4.to_string(),
 		}
 	}
 }
@@ -48,7 +52,7 @@ struct Session {
 impl Session {
 	async fn new(server_state: Arc<ServerState>, preamble: Option<String>) -> Result<Session, ServerError> {
 		let mut newid: [u8; ID_SIZE_BINARY] = [0; ID_SIZE_BINARY];
-		rand::thread_rng().fill_bytes(&mut newid);
+		thread_rng().fill_bytes(&mut newid);
 		let newid = newid.to_vec().iter().map(|i| format!("{:02x}", i)).collect::<String>();
 		let sock = TcpStream::connect(server_state.dest).await?;
 		let (reader, mut writer) = sock.into_split();
@@ -95,7 +99,7 @@ enum OpStatus {
 enum ServerError {
 	IO(std::io::Error),
 	JOIN(tokio::task::JoinError),
-	HYPER(hyper::error::Error),
+	HYPER(hyper::Error),
 }
 
 impl From<std::io::Error> for ServerError {
@@ -110,8 +114,8 @@ impl From<tokio::task::JoinError> for ServerError {
 	}
 }
 
-impl From<hyper::error::Error> for ServerError {
-	fn from(e: hyper::error::Error) -> ServerError {
+impl From<hyper::Error> for ServerError {
+	fn from(e: hyper::Error) -> ServerError {
 		ServerError::HYPER(e)
 	}
 }
@@ -222,15 +226,11 @@ macro_rules! format_proxy_protocol {
     }
 }
 
-fn get_xff_ip<T>(req: &Request<T>) -> Option<String> {
-	if !req.headers().contains_key("x-forwarded-for") {
-		return None;
-	}
-	let xff = match req.headers()["x-forwarded-for"].to_str() {
-		Ok(xff) => xff,
-		_ => return None,
-	};
-	Some(String::from(xff))
+fn get_client_ip<T>(header: String, req: &Request<T>) -> Option<String> {
+	match req.headers()[header].to_str() {
+        Ok(val) => Some(String::from(val)),
+        Err(_) => None,
+    }
 }
 
 async fn timeout_watchdog(session: Arc<Session>, server_state: Arc<ServerState>) -> Result<(), ServerError> {
@@ -239,7 +239,7 @@ async fn timeout_watchdog(session: Arc<Session>, server_state: Arc<ServerState>)
 		let mut idle_count: u32 = 0;
 		let hb_before = session.heartbeat.load(Ordering::Relaxed);
 		while session.open.load(Ordering::Relaxed) {
-			delay_for(ONE_SECOND).await;
+			sleep(ONE_SECOND).await;
 			let hb_after = session.heartbeat.load(Ordering::Relaxed);
 			if hb_before == hb_after {
 				debug!("session {} idle_count {}", session.id, idle_count);
@@ -273,32 +273,26 @@ async fn do_send(req: Request<Body>, server_state: Arc<ServerState>) -> Result<R
 	let req_id = get_session_id!(req);
 	let session = get_session!(req_id, &server_state);
 	let mut locked_writer = session.writer.lock().await;
-	let mut body = req.into_body();
+	let body = req.into_body();
 	let mut nonempty = false;
-	loop {
-		let chunk = match body.next().await {
-			Some(c) => {
-				nonempty = true;
-				c
-			}
-			None => break,
-		};
-		let buff = match chunk {
-			Ok(b) => b,
-			Err(_) => {
-				error!("error reading post body");
-				tokio::spawn(Session::shutdown(session.clone(), server_state.clone()));
-				return Ok(make_response!(500));
-			}
-		};
-		match locked_writer.write_all(&buff).await {
-			Ok(_) => {},
-			Err(_) => {
-				error!("error sending to socket");
-				tokio::spawn(Session::shutdown(session.clone(), server_state.clone()));
-				return Ok(make_response!(500));
-			}
-		};
+	let buff = match hyper::body::to_bytes(body).await {
+		Ok(b) => {
+			if b.len() > 0 { nonempty = true; };
+			b
+		},
+		Err(_) => {
+			error!("error reading post body");
+			tokio::spawn(Session::shutdown(session.clone(), server_state.clone()));
+			return Ok(make_response!(500));
+		}
+	};
+	match locked_writer.write_all(&buff).await {
+		Ok(_) => {},
+		Err(_) => {
+			error!("error writing to socket");
+			tokio::spawn(Session::shutdown(session.clone(), server_state.clone()));
+			return Ok(make_response!(500));
+		},
 	}
 	if nonempty {
 		session.heartbeat.fetch_add(1, Ordering::AcqRel);
@@ -355,7 +349,7 @@ async fn do_create(req: Request<Body>, client_addr: SocketAddr, server_state: Ar
 	}
     let preamble: Option<String> = match server_state.proxy_protocol {
         true  => {
-            match get_xff_ip(&req) {
+            match get_client_ip(server_state.client_ip_header.clone(), &req) {
                 Some(xff_ip) => Some(format_proxy_protocol!(xff_ip, "127.0.0.1", "65533", "65534")),
                 None => return Ok(make_response!(500))
             }
@@ -383,8 +377,9 @@ async fn do_create(req: Request<Body>, client_addr: SocketAddr, server_state: Ar
 		let mut wsessions = sessions.write().await;
 		wsessions.insert(id.clone(), session);
 	}
-	match get_xff_ip(&req) {
-		Some(xff) => info!("created session with id {} for {} with X-Forwarded-For: \"{}\"", id, client_addr, xff),
+	match get_client_ip(server_state.client_ip_header.clone(), &req) {
+		Some(xff) => info!("created session with id {} for {} with \"{}\": \"{}\"",
+                           id, client_addr, server_state.client_ip_header, xff),
 		None => info!("created session with id {} for {}", id, client_addr),
 	};
 	Ok(make_response!(200, Body::from(id)))
@@ -413,7 +408,6 @@ async fn router(req: Request<Body>, client_addr: SocketAddr, server_state: Arc<S
 
 #[tokio::main]
 async fn listen(listen_port: SocketAddr, server_state: Arc<ServerState>) -> Result<OpStatus, ServerError> {
-	use hyper::server::conn::AddrStream;
 	let server_state = server_state.clone();
 	let service = make_service_fn(move |socket: &AddrStream| {
 		let client_addr = socket.remote_addr();
@@ -426,7 +420,7 @@ async fn listen(listen_port: SocketAddr, server_state: Arc<ServerState>) -> Resu
 	Ok(OpStatus::Done)
 }
 
-pub fn run(listen_port: &str, dest_port: &str, log_path: &str, opts: (usize, u32, bool, bool)) -> i32 {
+pub fn run(listen_port: &str, dest_port: &str, log_path: &str, opts: (usize, u32, bool, bool, String)) -> i32 {
 	if log_path == "stderr" {
 		Logger::with_env_or_str("layline=info, server=info")
 			.format(opt_format)
