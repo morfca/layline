@@ -1,6 +1,6 @@
 [package]
 name = "layline"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Anthony Roberts <acrobert@gmail.com>"]
 edition = "2018"
 
