@@ -23,16 +23,18 @@ struct ServerState {
 	max_sessions: usize,
 	session_timeout: u32,
     proxy_protocol: bool,
+    client_ip_header: String,
 }
 
 impl ServerState {
-	fn new(dest: SocketAddr, opts: (usize, u32, bool, bool)) -> ServerState {
+	fn new(dest: SocketAddr, opts: (usize, u32, bool, bool, String)) -> ServerState {
 		ServerState {
 			sessions: Arc::new(RwLock::new(HashMap::new())),
 			dest: dest,
 			max_sessions: opts.0,
 			session_timeout: opts.1,
             proxy_protocol: opts.3,
+            client_ip_header: opts.4.to_string(),
 		}
 	}
 }
@@ -222,15 +224,11 @@ macro_rules! format_proxy_protocol {
     }
 }
 
-fn get_xff_ip<T>(req: &Request<T>) -> Option<String> {
-	if !req.headers().contains_key("x-forwarded-for") {
-		return None;
-	}
-	let xff = match req.headers()["x-forwarded-for"].to_str() {
-		Ok(xff) => xff,
-		_ => return None,
-	};
-	Some(String::from(xff))
+fn get_client_ip<T>(header: String, req: &Request<T>) -> Option<String> {
+	match req.headers()[header].to_str() {
+        Ok(val) => Some(String::from(val)),
+        Err(_) => None,
+    }
 }
 
 async fn timeout_watchdog(session: Arc<Session>, server_state: Arc<ServerState>) -> Result<(), ServerError> {
@@ -355,7 +353,7 @@ async fn do_create(req: Request<Body>, client_addr: SocketAddr, server_state: Ar
 	}
     let preamble: Option<String> = match server_state.proxy_protocol {
         true  => {
-            match get_xff_ip(&req) {
+            match get_client_ip(server_state.client_ip_header.clone(), &req) {
                 Some(xff_ip) => Some(format_proxy_protocol!(xff_ip, "127.0.0.1", "65533", "65534")),
                 None => return Ok(make_response!(500))
             }
@@ -383,8 +381,9 @@ async fn do_create(req: Request<Body>, client_addr: SocketAddr, server_state: Ar
 		let mut wsessions = sessions.write().await;
 		wsessions.insert(id.clone(), session);
 	}
-	match get_xff_ip(&req) {
-		Some(xff) => info!("created session with id {} for {} with X-Forwarded-For: \"{}\"", id, client_addr, xff),
+	match get_client_ip(server_state.client_ip_header.clone(), &req) {
+		Some(xff) => info!("created session with id {} for {} with \"{}\": \"{}\"",
+                           id, client_addr, server_state.client_ip_header, xff),
 		None => info!("created session with id {} for {}", id, client_addr),
 	};
 	Ok(make_response!(200, Body::from(id)))
@@ -426,7 +425,7 @@ async fn listen(listen_port: SocketAddr, server_state: Arc<ServerState>) -> Resu
 	Ok(OpStatus::Done)
 }
 
-pub fn run(listen_port: &str, dest_port: &str, log_path: &str, opts: (usize, u32, bool, bool)) -> i32 {
+pub fn run(listen_port: &str, dest_port: &str, log_path: &str, opts: (usize, u32, bool, bool, String)) -> i32 {
 	if log_path == "stderr" {
 		Logger::with_env_or_str("layline=info, server=info")
 			.format(opt_format)
