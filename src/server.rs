@@ -54,12 +54,12 @@ impl Session {
 		let (reader, mut writer) = sock.into_split();
         match preamble {
             Some(buff) => {
-                 match writer.write_all(&buff.as_bytes()).await {
-                     Ok(_) => (),
-                     Err(e) => {
-                         return Err(ServerError::IO(e))
-                     }
-                 }
+                match writer.write_all(&buff.as_bytes()).await {
+                    Ok(_) => (),
+                    Err(e) => {
+                        return Err(ServerError::IO(e))
+                    }
+                }
                 ()
             }
             None => ()
@@ -356,7 +356,7 @@ async fn do_create(req: Request<Body>, client_addr: SocketAddr, server_state: Ar
     let preamble: Option<String> = match server_state.proxy_protocol {
         true  => {
             match get_xff_ip(&req) {
-                Some(xff_ip) => Some(format_proxy_protocol!(xff_ip, "127.0.0.1", "65535", "65535")),
+                Some(xff_ip) => Some(format_proxy_protocol!(xff_ip, "127.0.0.1", "65533", "65534")),
                 None => return Ok(make_response!(500))
             }
         }
