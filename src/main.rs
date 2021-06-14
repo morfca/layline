@@ -10,6 +10,9 @@ fn main() {
 		.version("0.2")
 		.author("Anthony Roberts <acrobert@gmail.com>")
 		.about("tunnel connections via HTTP")
+        .arg(Arg::new("PROXY_PROTOCOL")
+             .about("use proxy protocol to signal client IP to downstream service")
+             .long("proxy-protocol"))
 		.arg(Arg::new("SESSION_TIMEOUT")
 			.about("inactivity timeout for sessions in seconds, default=900")
 			.long("session-timeout")
@@ -61,7 +64,8 @@ fn main() {
 		None => constants::DEFAULT_SESSION_TIMEOUT,
 	};
 	let allow_plaintext = matches.is_present("ALLOW_PLAINTEXT");
-	let opts = (max_sessions, timeout_sessions, allow_plaintext);
+    let proxy_protocol = matches.is_present("PROXY_PROTOCOL");
+	let opts = (max_sessions, timeout_sessions, allow_plaintext, proxy_protocol);
 	match matches.subcommand() {
 		Some(("proxyclient", matches)) => {
 			let dest_port = matches.value_of("DEST_URL").unwrap();

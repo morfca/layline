@@ -22,15 +22,17 @@ struct ServerState {
 	dest: SocketAddr,
 	max_sessions: usize,
 	session_timeout: u32,
+    proxy_protocol: bool,
 }
 
 impl ServerState {
-	fn new(dest: SocketAddr, opts: (usize, u32, bool)) -> ServerState {
+	fn new(dest: SocketAddr, opts: (usize, u32, bool, bool)) -> ServerState {
 		ServerState {
 			sessions: Arc::new(RwLock::new(HashMap::new())),
 			dest: dest,
 			max_sessions: opts.0,
 			session_timeout: opts.1,
+            proxy_protocol: opts.3,
 		}
 	}
 }
@@ -44,12 +46,24 @@ struct Session {
 }
 
 impl Session {
-	async fn new(server_state: Arc<ServerState>) -> Result<Session, ServerError> {
+	async fn new(server_state: Arc<ServerState>, preamble: Option<String>) -> Result<Session, ServerError> {
 		let mut newid: [u8; ID_SIZE_BINARY] = [0; ID_SIZE_BINARY];
 		rand::thread_rng().fill_bytes(&mut newid);
 		let newid = newid.to_vec().iter().map(|i| format!("{:02x}", i)).collect::<String>();
 		let sock = TcpStream::connect(server_state.dest).await?;
-		let (reader, writer) = sock.into_split();
+		let (reader, mut writer) = sock.into_split();
+        match preamble {
+            Some(buff) => {
+                 match writer.write_all(&buff.as_bytes()).await {
+                     Ok(_) => (),
+                     Err(e) => {
+                         return Err(ServerError::IO(e))
+                     }
+                 }
+                ()
+            }
+            None => ()
+        }
 		Ok(Session {
 			id: newid,
 			reader: Mutex::new(reader),
@@ -202,7 +216,13 @@ macro_rules! get_session {
 	}
 }
 
-fn get_xff_ip<T>(req: Request<T>) -> Option<String> {
+macro_rules! format_proxy_protocol {
+    ($src_ip:expr, $dst_ip:expr, $src_port:expr, $dst_port:expr) => {
+        format!("PROXY TCP4 {} {} {} {}\r\n", $src_ip, $dst_ip, $src_port, $dst_port)
+    }
+}
+
+fn get_xff_ip<T>(req: &Request<T>) -> Option<String> {
 	if !req.headers().contains_key("x-forwarded-for") {
 		return None;
 	}
@@ -333,7 +353,16 @@ async fn do_create(req: Request<Body>, client_addr: SocketAddr, server_state: Ar
 			return Ok(make_response!(500));
 		};
 	}
-	let session: Session = match tokio::spawn(Session::new(temp_state)).await {
+    let preamble: Option<String> = match server_state.proxy_protocol {
+        true  => {
+            match get_xff_ip(&req) {
+                Some(xff_ip) => Some(format_proxy_protocol!(xff_ip, "127.0.0.1", "65535", "65535")),
+                None => return Ok(make_response!(500))
+            }
+        }
+        false => None
+    };
+	let session: Session = match tokio::spawn(Session::new(temp_state, preamble)).await {
 		Ok(s) => match s {
 			Ok(ss) => ss,
 			Err(e) => {
@@ -354,7 +383,7 @@ async fn do_create(req: Request<Body>, client_addr: SocketAddr, server_state: Ar
 		let mut wsessions = sessions.write().await;
 		wsessions.insert(id.clone(), session);
 	}
-	match get_xff_ip(req) {
+	match get_xff_ip(&req) {
 		Some(xff) => info!("created session with id {} for {} with X-Forwarded-For: \"{}\"", id, client_addr, xff),
 		None => info!("created session with id {} for {}", id, client_addr),
 	};
@@ -397,7 +426,7 @@ async fn listen(listen_port: SocketAddr, server_state: Arc<ServerState>) -> Resu
 	Ok(OpStatus::Done)
 }
 
-pub fn run(listen_port: &str, dest_port: &str, log_path: &str, opts: (usize, u32, bool)) -> i32 {
+pub fn run(listen_port: &str, dest_port: &str, log_path: &str, opts: (usize, u32, bool, bool)) -> i32 {
 	if log_path == "stderr" {
 		Logger::with_env_or_str("layline=info, server=info")
 			.format(opt_format)
