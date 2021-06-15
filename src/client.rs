@@ -354,11 +354,7 @@ impl ClientSession {
 
 // listener acceptor for handling incoming connections
 async fn client_listen(h: Handle, listen_port: String, base_url: String, opts: (usize, u32, bool, bool, String)) -> Result<ClientOpStatus, tokio::io::Error> {
-<<<<<<< HEAD
 	let listener = TcpListener::bind(listen_port).await?;
-=======
-	let mut listener = TcpListener::bind(listen_port).await?;
->>>>>>> 849c8ddcee7bd21fa639697dbaf9a2fbc4b23834
 	loop {
 		let (sock, addr) = listener.accept().await?;
 		let (reader, writer) = sock.into_split();
