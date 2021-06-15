@@ -15,7 +15,9 @@ cargo build --release
 
 This utility provides a server and client in a combined binary. The server may be exposed directly to the internet, however in typical usage it is expected it will operate behind a more full-featured HTTP server, for example, Apache with mod_proxy. This utility does not provide https, name-based virtual hosting, or other features that are likely to be useful in a real world installation. The server only terminates connections to the IP/port provided on the command line as a security measure, to prevent it from being abused to proxy connections to arbitrary hosts.
 
-There are two client modes. The first creates a standing process that listens for connections and creates new sessions to tunnel each connection. The second is intended for use with processes that can read/write to stdin/stdout, for example with the "ProxyCommand" option in OpenSSH. Please note that unlike ssh, layline **does not provide any encryption of its own**. It is the responsibility of the user to ensure their configuration is either using https or that the tunneled protocol provides encryption and verification by itself (for example, ssh). Note that even with encryption, the tunneled session is likely to be discoverable with statistical/behavioral monitoring.
+There are two client modes. The first creates a standing process that listens for connections and creates new sessions to tunnel each connection. The second is intended for use with processes that can read/write to stdin/stdout, for example with the "ProxyCommand" option in OpenSSH.
+
+Please note that unlike ssh, layline **does not provide any encryption of its own**. It is the responsibility of the user to ensure their configuration is either using https or that the tunneled protocol provides encryption and verification by itself (for example, ssh). Note that even with encryption, the tunneled session is likely to be discoverable with statistical/behavioral monitoring. Moreover, even with encryption a CDN or proxy that provides TLS termination services or that is able to transparently decrypt TLS traffic will be able to identify the nature of the traffic being tunneled as certain parts of the handshake, like the SSH version string, are sent as plaintext.
 
 ## motivation
 
@@ -59,12 +61,11 @@ This utility can, for example, provide ssh access to a bastion host over HTTP pr
 
 ### apache
 
-this hosts layline API endpoints at the example path /abc123/ on a plaintext host that redirects all other paths to the https host, with the layline server running on 127.0.0.1:8080.
+this hosts layline API endpoints at the example path /abc123/ on a plaintext host, with the layline server running on 127.0.0.1:8080.
 
 ```
 <VirtualHost *:80>
   ServerName www.example.org
-  RedirectMatch "^/(?!abc123/).*" "https://www.example.org$0"
   ProxyPass "/abc123/" "http://localhost:8080/"
 </VirtualHost>
 ```
@@ -78,7 +79,7 @@ Host example.org
   ProxyCommand layline proxyclient https://example.org/abc123/
 ```
 
-with this config in place an ssh session can be established transparently
+with this config in place an ssh session can be established transparently, and other functions such as ssh host key verification will behave as expected
 
 ```
 user@laptop ~ $ ssh example.org
@@ -99,11 +100,11 @@ user@server ~ $
 
 ### GET /create
 
-Returns a session ID in the HTTP body. This session must be provided in the X-Layline-Session header in further requests.
+Returns a session ID in the HTTP body. This session must be provided in the X-Layline-Session header in subsequent requests.
 
 ### GET /recv
 
-Returns bytes from the tunneled connection, up to 1 MiB. If no bytes are available to read, wait for up to 10s before returning with zero bytes in the HTTP body. May be called again immediately after returning regardless of body size.
+Returns bytes from the tunneled connection, up to 1 MiB. If no bytes are available to read, wait for up to 10s before returning with zero bytes in the HTTP body. May be called again immediately after returning regardless of body size. This call is not idempotent and buffered data from the proxied socket will always be returned at most once in the order it is received.
 
 ### POST /send
 
@@ -115,4 +116,4 @@ Destroys the session on the server. This will cause the connection to be disconn
 
 ### remote disconnect
 
-In some cases the remote side of the session may disconnect asynchronously. This may happen if the server side idle timeout is reached, the remote connection on the server side is terminated, the layline process is restarted, etc. In such cases subsequent requests to the /recv, /send, or /close endpoints will return a 404. The client treats these cases as the connection being cleanly terminated by the remote side, and will close the associated session locally as well. In proxyclient mode the client process will terminate. The session will terminate with error with all other HTTP status codes or failure to connect, for example layer 7 load balancers and proxies typically return a 503 when the backend service is unavailable. HTTP client retries are not implemented at this time.
+In some cases the remote side of the session may disconnect asynchronously. This may happen if the server side idle timeout is reached, the remote connection on the server side is terminated, the layline process is restarted, an ssh session is terminated by pressing ctrl-D, etc. In such cases subsequent requests to the /recv, /send, or /close endpoints will return a 404. The client treats these cases as the connection being cleanly terminated by the remote side, and will close the associated session locally as well. In proxyclient mode the client process will terminate. The session will terminate with error on all other HTTP status codes, or on failure to connect, or on a non-200 code being returned from the /create endpoint. For example layer 7 load balancers and proxies typically return a 503 when the backend service is unavailable, and this is treated as a connection termination even if the 503 is caused by a transient issue on the load balancer. HTTP client retries are not supported at this time.
