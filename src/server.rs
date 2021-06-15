@@ -273,32 +273,26 @@ async fn do_send(req: Request<Body>, server_state: Arc<ServerState>) -> Result<R
 	let req_id = get_session_id!(req);
 	let session = get_session!(req_id, &server_state);
 	let mut locked_writer = session.writer.lock().await;
-	let mut body = req.into_body();
+	let body = req.into_body();
 	let mut nonempty = false;
-	loop {
-		let chunk = match body.next().await {
-			Some(c) => {
-				nonempty = true;
-				c
-			}
-			None => break,
-		};
-		let buff = match chunk {
-			Ok(b) => b,
-			Err(_) => {
-				error!("error reading post body");
-				tokio::spawn(Session::shutdown(session.clone(), server_state.clone()));
-				return Ok(make_response!(500));
-			}
-		};
-		match locked_writer.write_all(&buff).await {
-			Ok(_) => {},
-			Err(_) => {
-				error!("error sending to socket");
-				tokio::spawn(Session::shutdown(session.clone(), server_state.clone()));
-				return Ok(make_response!(500));
-			}
-		};
+	let buff = match hyper::body::to_bytes(body).await {
+		Ok(b) => {
+			if b.len() > 0 { nonempty = true; };
+			b
+		},
+		Err(_) => {
+			error!("error reading post body");
+			tokio::spawn(Session::shutdown(session.clone(), server_state.clone()));
+			return Ok(make_response!(500));
+		}
+	};
+	match locked_writer.write_all(&buff).await {
+		Ok(_) => {},
+		Err(_) => {
+			error!("error writing to socket");
+			tokio::spawn(Session::shutdown(session.clone(), server_state.clone()));
+			return Ok(make_response!(500));
+		},
 	}
 	if nonempty {
 		session.heartbeat.fetch_add(1, Ordering::AcqRel);
