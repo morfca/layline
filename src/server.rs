@@ -7,7 +7,8 @@ use flexi_logger::{Logger, opt_format};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server, StatusCode};
 use log::{debug, error, info, warn};
-use rand_core::RngCore;
+use rand::RngCore;
+use rand::thread_rng;
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::prelude::*;
@@ -50,7 +51,7 @@ struct Session {
 impl Session {
 	async fn new(server_state: Arc<ServerState>, preamble: Option<String>) -> Result<Session, ServerError> {
 		let mut newid: [u8; ID_SIZE_BINARY] = [0; ID_SIZE_BINARY];
-		rand::thread_rng().fill_bytes(&mut newid);
+		thread_rng().fill_bytes(&mut newid);
 		let newid = newid.to_vec().iter().map(|i| format!("{:02x}", i)).collect::<String>();
 		let sock = TcpStream::connect(server_state.dest).await?;
 		let (reader, mut writer) = sock.into_split();
