@@ -227,8 +227,11 @@ macro_rules! format_proxy_protocol {
 }
 
 fn get_client_ip<T>(header: String, req: &Request<T>) -> Option<String> {
-	match req.headers()[header].to_str() {
-        Ok(val) => Some(String::from(val)),
+    match req.headers()[header].to_str() {
+        Ok(val) => match val.split_whitespace().last() {
+            Some(val2) => Some(String::from(val2)),
+            None => None,
+	}, // xff may have multiple entries, only return the last
         Err(_) => None,
     }
 }
