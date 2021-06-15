@@ -3,10 +3,12 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
-use flexi_logger::{Logger, opt_format};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server, StatusCode};
 use log::{debug, error, info, warn};
+use log4rs::append::console::ConsoleAppender;
+use log4rs::config::{Appender, Root};
+use log4rs::Config;
 use rand_core::RngCore;
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
@@ -427,17 +429,13 @@ async fn listen(listen_port: SocketAddr, server_state: Arc<ServerState>) -> Resu
 
 pub fn run(listen_port: &str, dest_port: &str, log_path: &str, opts: (usize, u32, bool, bool, String)) -> i32 {
 	if log_path == "stderr" {
-		Logger::with_env_or_str("layline=info, server=info")
-			.format(opt_format)
-			.start()
+        let stderr = ConsoleAppender::builder().build();
+        let config = Config::builder().appender(Appender::builder().build("stderr", Box::new(stderr)))
+            .build(Root::builder().appender("stderr").build(LevelFilter::Trace))
 			.unwrap_or_else(|e| panic!("Logger initialization failed with {}", e));
 	}
 	else {
-		Logger::with_env_or_str("layline=info, server=info")
-			.log_to_file()
-			.directory(log_path)
-			.format(opt_format)
-			.start()
+        log4rs::init_file(log_path, Default::default())
 			.unwrap_or_else(|e| panic!("Logger initialization failed with {}", e));
 	}
 	let listen_port: SocketAddr = listen_port.parse().expect("ip:port for webserver");
