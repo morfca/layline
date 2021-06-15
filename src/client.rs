@@ -7,14 +7,13 @@ use std::sync::Arc;
 
 use flexi_logger::{Logger, opt_format};
 use log::{debug, error, info};
-use tokio::io::{Stdin, Stdout};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, Stdin, Stdout};
 use tokio::net::TcpListener;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::prelude::*;
 use tokio::runtime::Handle;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::Mutex;
-use tokio::time::{delay_for, timeout, Duration};
+use tokio::time::{sleep, timeout, Duration};
 use regex::Regex;
 
 use crate::constants::*;
@@ -149,7 +148,7 @@ impl ClientSession {
 			let mut idle_count: u32 = 0;
 			let hb_before = cs.heartbeat.load(Ordering::Relaxed);
 			while cs.open.load(Ordering::Relaxed) {
-				delay_for(ONE_SECOND).await;
+				sleep(ONE_SECOND).await;
 				let hb_after = cs.heartbeat.load(Ordering::Relaxed);
 				if hb_before == hb_after {
 					idle_count += 1;
@@ -355,7 +354,7 @@ impl ClientSession {
 
 // listener acceptor for handling incoming connections
 async fn client_listen(h: Handle, listen_port: String, base_url: String, opts: (usize, u32, bool, bool, String)) -> Result<ClientOpStatus, tokio::io::Error> {
-	let mut listener = TcpListener::bind(listen_port).await?;
+	let listener = TcpListener::bind(listen_port).await?;
 	loop {
 		let (sock, addr) = listener.accept().await?;
 		let (reader, writer) = sock.into_split();

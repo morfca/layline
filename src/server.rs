@@ -9,12 +9,11 @@ use hyper::{Body, Request, Response, Server, StatusCode};
 use log::{debug, error, info, warn};
 use rand::RngCore;
 use rand::thread_rng;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::prelude::*;
-use tokio::stream::StreamExt;
 use tokio::sync::{Mutex, RwLock};
-use tokio::time::{delay_for, timeout};
+use tokio::time::{sleep, timeout};
 
 use crate::constants::*;
 
@@ -238,7 +237,7 @@ async fn timeout_watchdog(session: Arc<Session>, server_state: Arc<ServerState>)
 		let mut idle_count: u32 = 0;
 		let hb_before = session.heartbeat.load(Ordering::Relaxed);
 		while session.open.load(Ordering::Relaxed) {
-			delay_for(ONE_SECOND).await;
+			sleep(ONE_SECOND).await;
 			let hb_after = session.heartbeat.load(Ordering::Relaxed);
 			if hb_before == hb_after {
 				debug!("session {} idle_count {}", session.id, idle_count);
