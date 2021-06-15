@@ -50,24 +50,12 @@ struct Session {
 }
 
 impl Session {
-	async fn new(server_state: Arc<ServerState>, preamble: Option<String>) -> Result<Session, ServerError> {
+	async fn new(server_state: Arc<ServerState>) -> Result<Session, ServerError> {
 		let mut newid: [u8; ID_SIZE_BINARY] = [0; ID_SIZE_BINARY];
 		thread_rng().fill_bytes(&mut newid);
 		let newid = newid.to_vec().iter().map(|i| format!("{:02x}", i)).collect::<String>();
 		let sock = TcpStream::connect(server_state.dest).await?;
-		let (reader, mut writer) = sock.into_split();
-        match preamble {
-            Some(buff) => {
-                match writer.write_all(&buff.as_bytes()).await {
-                    Ok(_) => (),
-                    Err(e) => {
-                        return Err(ServerError::IO(e))
-                    }
-                }
-                ()
-            }
-            None => ()
-        }
+		let (reader, writer) = sock.into_split();
 		Ok(Session {
 			id: newid,
 			reader: Mutex::new(reader),
@@ -326,6 +314,7 @@ async fn do_recv(req: Request<Body>, server_state: Arc<ServerState>) -> Result<R
 		}
 	};
 	if read_len == 0 {
+        debug!("unexpected empty buffer for recv, calling shutdown");
 		tokio::spawn(Session::shutdown(session.clone(), server_state.clone()));
 	}
 	session.heartbeat.fetch_add(1, Ordering::AcqRel);
@@ -350,16 +339,7 @@ async fn do_create(req: Request<Body>, client_addr: SocketAddr, server_state: Ar
 			return Ok(make_response!(500));
 		};
 	}
-    let preamble: Option<String> = match server_state.proxy_protocol {
-        true  => {
-            match get_client_ip(server_state.client_ip_header.clone(), &req) {
-                Some(xff_ip) => Some(format_proxy_protocol!(xff_ip, "127.0.0.1", "65533", "65534")),
-                None => return Ok(make_response!(500))
-            }
-        }
-        false => None
-    };
-	let session: Session = match tokio::spawn(Session::new(temp_state, preamble)).await {
+	let session: Session = match tokio::spawn(Session::new(temp_state)).await {
 		Ok(s) => match s {
 			Ok(ss) => ss,
 			Err(e) => {
@@ -374,17 +354,36 @@ async fn do_create(req: Request<Body>, client_addr: SocketAddr, server_state: Ar
 	};
 	let session = Arc::new(session);
 	tokio::spawn(timeout_watchdog(session.clone(), server_state.clone()));
+    match server_state.proxy_protocol {
+        true  => {
+            let preamble = match get_client_ip(server_state.client_ip_header.clone(), &req) {
+                Some(xff_ip) => {
+                    debug!("using {} for proxy_protocol preamble", xff_ip);
+                    format_proxy_protocol!(xff_ip, "127.0.0.1", "0", "443")
+                }
+                None => return Ok(make_response!(500))
+            };
+            match session.writer.lock().await.write_all(&preamble.as_bytes()).await {
+                Ok(_) => {},
+                Err(_) => {
+                    debug!("io error writing proxy protocol preamble");
+                    return Ok(make_response!(500))
+                },
+            };
+            ()
+        },
+        false => {},
+    };
 	let id = session.id.clone();
-	{
-		let sessions = server_state.sessions.clone();
-		let mut wsessions = sessions.write().await;
-		wsessions.insert(id.clone(), session);
-	}
 	match get_client_ip(server_state.client_ip_header.clone(), &req) {
 		Some(xff) => info!("created session with id {} for {} with \"{}\": \"{}\"",
                            id, client_addr, server_state.client_ip_header, xff),
 		None => info!("created session with id {} for {}", id, client_addr),
 	};
+	{
+		let mut wsessions = server_state.sessions.write().await;
+		wsessions.insert(id.clone(), session);
+	}
 	Ok(make_response!(200, Body::from(id)))
 }
 
