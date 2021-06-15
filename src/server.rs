@@ -4,8 +4,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use flexi_logger::{Logger, opt_format};
+use hyper::{Body, Request, Response, StatusCode};
+use hyper::server::Server;
+use hyper::server::conn::AddrStream;
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Request, Response, Server, StatusCode};
 use log::{debug, error, info, warn};
 use rand::RngCore;
 use rand::thread_rng;
@@ -97,7 +99,7 @@ enum OpStatus {
 enum ServerError {
 	IO(std::io::Error),
 	JOIN(tokio::task::JoinError),
-	HYPER(hyper::error::Error),
+	HYPER(hyper::Error),
 }
 
 impl From<std::io::Error> for ServerError {
@@ -112,8 +114,8 @@ impl From<tokio::task::JoinError> for ServerError {
 	}
 }
 
-impl From<hyper::error::Error> for ServerError {
-	fn from(e: hyper::error::Error) -> ServerError {
+impl From<hyper::Error> for ServerError {
+	fn from(e: hyper::Error) -> ServerError {
 		ServerError::HYPER(e)
 	}
 }
@@ -412,7 +414,6 @@ async fn router(req: Request<Body>, client_addr: SocketAddr, server_state: Arc<S
 
 #[tokio::main]
 async fn listen(listen_port: SocketAddr, server_state: Arc<ServerState>) -> Result<OpStatus, ServerError> {
-	use hyper::server::conn::AddrStream;
 	let server_state = server_state.clone();
 	let service = make_service_fn(move |socket: &AddrStream| {
 		let client_addr = socket.remote_addr();
