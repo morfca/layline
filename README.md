@@ -3,7 +3,7 @@ A utility to tunnel network connections over HTTP.
 
 ## installing
 
-Requires rust >= 1.45.
+Requires rust >= 1.47.
 
 ```
 git clone https://github.com/morfca/layline.git
