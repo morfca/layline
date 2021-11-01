@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
-use flexi_logger::{Logger, opt_format};
+use flexi_logger::{Logger, opt_format, FileSpec};
 use hyper::{Body, Request, Response, StatusCode};
 use hyper::server::Server;
 use hyper::server::conn::AddrStream;
@@ -424,18 +424,25 @@ async fn listen(listen_port: SocketAddr, server_state: Arc<ServerState>) -> Resu
 
 pub fn run(listen_port: &str, dest_port: &str, log_path: &str, opts: (usize, u32, bool, bool, String)) -> i32 {
 	if log_path == "stderr" {
-		Logger::with_env_or_str("layline=info, server=info")
-			.format(opt_format)
-			.start()
-			.unwrap_or_else(|e| panic!("Logger initialization failed with {}", e));
+		match Logger::try_with_env_or_str("layline=info, server=info") {
+			Ok(l) => l.format(opt_format).start().unwrap(),
+			Err(e) => panic!("Logger initialization failed with {}", e),
+		};
 	}
 	else {
-		Logger::with_env_or_str("layline=info, server=info")
-			.log_to_file()
-			.directory(log_path)
-			.format(opt_format)
-			.start()
-			.unwrap_or_else(|e| panic!("Logger initialization failed with {}", e));
+		match Logger::try_with_env_or_str("layline=info, server=info") {
+			Ok(l) => {
+				let fs = FileSpec::default()
+					.directory(log_path)
+					.basename("layline")
+					.suppress_timestamp();
+				l
+					.log_to_file(fs)
+					.start()
+					.unwrap();
+			}
+			Err(e) => panic!("Logger initialization failed with {}", e),
+		}
 	}
 	let listen_port: SocketAddr = listen_port.parse().expect("ip:port for webserver");
 	let dest_port: SocketAddr = dest_port.parse().expect("destination ip:port");

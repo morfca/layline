@@ -377,10 +377,10 @@ fn validate_url(base_url: &str, opts: (usize, u32, bool, bool, String)) {
 // synchronous initialization function for running as a standing listener that creates
 // sessions for each incoming connection
 pub fn run(listen_port: &str, base_url: &str, opts: (usize, u32, bool, bool, String)) -> i32 {
-	Logger::with_env_or_str("layline=info, client=info")
-		.format(opt_format)
-		.start()
-		.unwrap_or_else(|e| panic!("Logger initialization failed with {}", e));
+	match Logger::try_with_env_or_str("layline=info, client=info") {
+		Ok(l) => l.format(opt_format).start().unwrap(),
+		Err(e) => panic!("Logger initialization failed with {}", e),
+	};
 	validate_url(&base_url, (opts.0, opts.1, opts.2, opts.3, opts.4.clone()));
 	let rt = tokio::runtime::Runtime::new().unwrap();
 	let h = rt.handle();
@@ -405,10 +405,10 @@ async fn do_proxy(h: Handle, base_url: String, opts: (usize, u32, bool, bool, St
 
 // synchronous initialization function for running as an stdin/stdout proxy
 pub fn proxy_run(base_url: &str, opts: (usize, u32, bool, bool, String)) -> i32 {
-	Logger::with_env_or_str("layline=error, client=error")
-		.format(opt_format)
-		.start()
-		.unwrap_or_else(|e| panic!("Logger initialization failed with {}", e));
+	match Logger::try_with_env_or_str("layline=info, client=info") {
+		Ok(l) => l.format(opt_format).start().unwrap(),
+		Err(e) => panic!("Logger initialization failed with {}", e),
+	};
 	validate_url(&base_url, (opts.0, opts.1, opts.2, opts.3, opts.4.clone()));
 	let rt = tokio::runtime::Runtime::new().unwrap();
 	let h = rt.handle();
