@@ -438,6 +438,7 @@ pub fn run(listen_port: &str, dest_port: &str, log_path: &str, opts: (usize, u32
 					.suppress_timestamp();
 				l
 					.log_to_file(fs)
+					.format(opt_format)
 					.start()
 					.unwrap();
 			}
