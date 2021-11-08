@@ -439,6 +439,7 @@ pub fn run(listen_port: &str, dest_port: &str, log_path: &str, opts: (usize, u32
 				l
 					.log_to_file(fs)
 					.format(opt_format)
+					.append()
 					.start()
 					.unwrap();
 			}
