@@ -405,7 +405,7 @@ async fn do_proxy(h: Handle, base_url: String, opts: (usize, u32, bool, bool, St
 
 // synchronous initialization function for running as an stdin/stdout proxy
 pub fn proxy_run(base_url: &str, opts: (usize, u32, bool, bool, String)) -> i32 {
-	match Logger::try_with_env_or_str("layline=warn client=warn") {
+	match Logger::try_with_env_or_str("layline=warn, client=warn") {
 		Ok(l) => l.format(opt_format).start().unwrap(),
 		Err(e) => panic!("Logger initialization failed with {}", e),
 	};
