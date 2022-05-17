@@ -10,8 +10,8 @@ lto = true
 codegen-units = 1
 
 [dependencies]
-clap = "3.0.0-beta.2"
-flexi_logger = "0.19.5"
+clap = "3.1"
+flexi_logger = "0.22"
 hyper = { version = "0.14", features = ["server"] }
 log = "0.4"
 rand = "0.8"
