@@ -229,7 +229,7 @@ impl ClientSession {
 				.send()
 				.await?;
 			match resp.status().as_u16() {
-				200 => (),
+				200 => {},
 				404 => {
 					info!("server reports session {} no longer exists", cs.id);
 					cs.rth.spawn(ClientSession::close(cs.clone()));
@@ -260,7 +260,7 @@ impl ClientSession {
 				.send()
 				.await?;
 			match response.status().as_u16() {
-				200 => (),
+				200 => {},
 				404 => {
 					info!("server reports session {} no longer exists", cs.id);
 					cs.rth.spawn(ClientSession::close(cs.clone()));
