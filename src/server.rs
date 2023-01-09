@@ -165,8 +165,8 @@ macro_rules! do_response {
 					}
 				}
 			}
-			Err(_) => {
-				warn!("problem joining handler function, sending 500");
+			Err(e) => {
+				warn!("problem joining handler function, sending 500: {}", e);
 				return Ok(make_response!(StatusCode::INTERNAL_SERVER_ERROR));
 			}
 		};
