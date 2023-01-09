@@ -215,13 +215,25 @@ macro_rules! format_proxy_protocol {
 }
 
 fn get_client_ip<T>(header: String, req: &Request<T>) -> Option<String> {
-    match req.headers()[header].to_str() {
-        Ok(val) => match val.split_whitespace().last() {
-            Some(val2) => Some(String::from(val2)),
-            None => None,
-	}, // xff may have multiple entries, only return the last
-        Err(_) => None,
-    }
+	if !req.headers().contains_key(&header) {
+		warn!("get_client_ip: missing {} header", &header);
+	}
+	match req.headers()[header].to_str() {
+		Ok(val) => match val.split_whitespace().last() {
+			Some(val2) => {
+				debug!("get_client_ip: xff={}", val2);
+				Some(String::from(val2))
+			},
+			None => {
+				debug!("get_client_ip: couldn't parse header");
+				None
+			}
+		}, // xff may have multiple entries, only return the last
+		Err(_) => {
+			debug!("get_client_ip: couldn't access header");
+			None
+		}
+	}
 }
 
 async fn timeout_watchdog(session: Arc<Session>, server_state: Arc<ServerState>) -> Result<(), ServerError> {
@@ -331,6 +343,7 @@ async fn do_close(req: Request<Body>, server_state: Arc<ServerState>) -> Result<
 
 async fn do_create(req: Request<Body>, client_addr: SocketAddr, server_state: Arc<ServerState>) -> Result<Response<Body>, ServerError> {
 	let temp_state = server_state.clone();
+	debug!("do_create: called");
 	{
 		let sessions_count = server_state.sessions.read().await.len();
 		debug!("create called, sessions count {}", sessions_count);
@@ -339,6 +352,7 @@ async fn do_create(req: Request<Body>, client_addr: SocketAddr, server_state: Ar
 			return Ok(make_response!(500));
 		};
 	}
+	debug!("do_create: allocating session");
 	let session: Session = match tokio::spawn(Session::new(temp_state)).await {
 		Ok(s) => match s {
 			Ok(ss) => ss,
@@ -353,6 +367,7 @@ async fn do_create(req: Request<Body>, client_addr: SocketAddr, server_state: Ar
 		}
 	};
 	let session = Arc::new(session);
+	debug!("do_create: spawning watchdog");
 	tokio::spawn(timeout_watchdog(session.clone(), server_state.clone()));
     match server_state.proxy_protocol {
         true  => {
@@ -375,15 +390,19 @@ async fn do_create(req: Request<Body>, client_addr: SocketAddr, server_state: Ar
         false => {},
     };
 	let id = session.id.clone();
-	match get_client_ip(server_state.client_ip_header.clone(), &req) {
+	let header = server_state.client_ip_header.clone();
+	debug!("do_create: getting client IP");
+	match get_client_ip(header, &req) {
 		Some(xff) => info!("created session with id {} for {} with \"{}\": \"{}\"",
                            id, client_addr, server_state.client_ip_header, xff),
 		None => info!("created session with id {} for {}", id, client_addr),
 	};
+	debug!("do_create: writing results");
 	{
 		let mut wsessions = server_state.sessions.write().await;
 		wsessions.insert(id.clone(), session);
 	}
+	debug!("do_create: returning");
 	Ok(make_response!(200, Body::from(id)))
 }
 
