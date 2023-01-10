@@ -12,7 +12,8 @@ codegen-units = 1
 [dependencies]
 clap = "3.1"
 flexi_logger = "0.24"
-hyper = { version = "0.14", features = ["server"] }
+http-body-util = "0.1.0-rc.2"
+hyper = { version = "1.0.0-rc.2", features = ["server"] }
 log = "0.4"
 rand = "0.8"
 rand_core = "0.6"
